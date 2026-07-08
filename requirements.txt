@@ -1,0 +1,14 @@
+numpy
+pandas
+scikit-learn
+scipy
+adelie
+tabpfn==8.0.3
+torch
+xgboost
+safetensors>=0.4.3   # needed by huggingface_hub to load TabFM's .safetensors weights
+openml               # prepare_data.py only — fetch OpenML-CTR23 datasets by name
+ucimlrepo            # prepare_data.py only — fetch UCI datasets by name
+# tabfm (third teacher) is source-only, not on PyPI — install into the venv:
+#   git clone https://github.com/google-research/tabfm && cd tabfm && pip install -e .[pytorch]
+#   (pins to a commit for reproducibility — record `git rev-parse HEAD`)

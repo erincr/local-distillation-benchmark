@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Experiment outputs
+results/
+figures/
+all_results.json
+
+# SLURM logs
+slurm_*.out
+slurm_*.err
+
+# Dataset caches — not distributed; regenerate with prepare_data.py (see DATA_SOURCES.md)
+*.npz
+openml_data/
+uci_data/
+
+# OS
+.DS_Store
