@@ -1,6 +1,6 @@
 # Local Distillation Benchmark
 
-Local distillation fits an interpretable, per-test-point regularized linear model that is locally faithful to a strong black-box **teacher** (e.g. TabPFN). This benchmark compares it against global baselines, other local explainers and local models across 17 regression datasets.
+Local distillation fits a local linear model for each test observation, guided by a strong black-box **teacher** (e.g. xgboost, TabPFN). This benchmark compares local distillation against other methods across 17 regression datasets.
 
 ## Methods
 
