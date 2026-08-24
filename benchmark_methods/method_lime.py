@@ -3,9 +3,7 @@
 The ``lime`` library calls the teacher once per test point, which for
 our 200-test-point benchmarks at num_samples=1000 costs ~7 min per
 (dataset, seed) cell on CPU.  All m * num_samples perturbation rows
-can be stacked into ONE TabPFN predict() call with the same final
-result, collapsing ~200 transformer-forward-pass overheads into one.
-This file does exactly that.
+are stacked into ONE TabPFN predict() call for speed.
 
 Algorithm (LIME continuous / ``discretize_continuous=False`` variant):
     1. Fit TabPFN on (X_tr, y_tr) once.
@@ -21,17 +19,10 @@ Algorithm (LIME continuous / ``discretize_continuous=False`` variant):
 
 Two deviations from the LIME paper:
     (1) Continuous perturbations (``discretize_continuous=False``)
-        instead of quartile discretization.  The continuous variant is
-        exposed in the author's released library and lets the local
-        coefficients sit on the raw (standardized) features, making
-        them directly comparable to global_lasso / ld output.
+        instead of quartile discretization. 
     (2) Weighted lasso (CV-chosen lambda) as the local surrogate,
         instead of the paper's K-LASSO feature selection + OLS refit
-        (or the library's Ridge(alpha=1) default).  This holds the
-        regularizer constant across every linear-surrogate method in
-        the benchmark (global_lasso, ld, lime), so cross-method
-        differences trace to the weighting scheme rather than the
-        penalty.
+        (or the library's Ridge(alpha=1) default).
 """
 from __future__ import annotations
 import time, sys
@@ -61,11 +52,7 @@ def run(X_tr, y_tr, X_te, y_te, seed, LIME_NUM_SAMPLES=1000, phi=None):
     X_pert[:, 0, :] = X_te
     X_pert[:, 1:, :] = rng.standard_normal((m, LIME_NUM_SAMPLES - 1, p)) * feat_std + feat_mean
 
-    # Teacher call on the (m * num_samples, p) stack, chunked so peak MPS
-    # memory stays bounded.  TabPFN's _cdf intermediates scale with n_test
-    # and at m*num_samples=32000 on MPS this overflowed the 48 GiB pool.
-    # Rows are independent given the fixed X_tr context, so chunked
-    # predictions match a single-call predict to FP32 roundoff.
+    # Teacher call on the (m * num_samples, p) stack, chunked.
     X_flat = X_pert.reshape(-1, p)
     LIME_PREDICT_BATCH = 2000
     pieces = [reg.predict(X_flat[s:s + LIME_PREDICT_BATCH]).astype(float)
@@ -73,9 +60,7 @@ def run(X_tr, y_tr, X_te, y_te, seed, LIME_NUM_SAMPLES=1000, phi=None):
     yss = np.concatenate(pieces).reshape(m, LIME_NUM_SAMPLES)
 
     # Per-test-point kernel-weighted lasso (5-fold CV lambda) on
-    # standardized perturbations.  Lasso chosen to hold the regularizer
-    # constant across global_lasso, ld, and lime, so cross-method
-    # differences are about the weighting scheme, not the penalty.
+    # standardized perturbations.
     Xs = (X_pert - feat_mean) / feat_std
     kw2 = (0.75 * np.sqrt(p)) ** 2
     betas = np.zeros((m, p)); intercepts = np.zeros(m); yhat = np.zeros(m)

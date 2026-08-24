@@ -46,17 +46,14 @@ XGB_KWARGS = dict(n_estimators=500, max_depth=6, learning_rate=0.05,
 ROOT = Path(__file__).resolve().parent.parent
 NAN = float("nan")
 
-# TabPFN ensemble size.  Default is 32; we use 8 — benchmarked to be
-# ~4x faster with negligible MSE change across our dataset panel.
+# TabPFN ensemble size.
+# Default is 32; using 8
+# Benchmarked to be ~4x faster with
+# negligible MSE change across our dataset panel.
 TABPFN_N_ESTIMATORS = 8
 
-# TabPFN model generation — pinned explicitly so the teacher is fixed
-# regardless of which tabpfn package version is installed (the package's own
-# default has moved v2 -> v2.5 -> v2.6 -> v3 across releases).  v3 = TabPFN-3.
-# We resolve by ENUM MEMBER NAME (V3, V2_6, ...) rather than by string value,
-# because the enum's *values* differ across tabpfn releases (e.g. "v3" is not
-# always a valid value).  Override with env TABPFN_MODEL_VERSION in either
-# form, e.g. "V3" / "v3" / "v2.6" / "V2_6".
+# TabPFN model generation
+# Pinned - new versions keep coming out!
 if HAS_TABPFN:
     import os as _os_mv, tabpfn as _tabpfn_pkg
     _mv_req = _os_mv.environ.get("TABPFN_MODEL_VERSION", "V3")
@@ -97,14 +94,15 @@ TABPFN_DEVICE = _autodetect_device()
 # Adelie lasso / elastic-net wrappers                                          #
 # --------------------------------------------------------------------------- #
 def _glmnet_min_ratio(n, p):
-    """glmnet's lambda.min.ratio convention.  Adelie's default (0.1) can
+    """glmnet's lambda.min.ratio.  Adelie's default (0.1) can
     truncate the path before reaching the CV-optimal lambda on n > p
     problems."""
     return 0.01 if n < p else 0.0001
 
 
-def adelie_lasso_cv(X_train, y_train, n_folds=5, seed=None, weights=None):
-    """Fit lasso with CV lambda selection via adelie.
+def adelie_lasso_cv(X_train, y_train, n_folds=5, seed=None, weights=None,
+                    alpha=1.0):
+    """Fit elastic net with CV lambda selection via adelie (alpha=1 = lasso).
     ``weights`` are observation weights (same length as y_train); None = uniform.
     Returns dict with ``best_lambda``, ``beta``, ``intercept``, ``cv_result``.
     """
@@ -118,22 +116,18 @@ def adelie_lasso_cv(X_train, y_train, n_folds=5, seed=None, weights=None):
         glm_obj = ad.glm.gaussian(y, weights=weights.astype(np.float64))
 
     cv_res = ad.cv.cv_grpnet(
-        X, glm_obj, n_folds=n_folds, seed=seed,
+        X, glm_obj, n_folds=n_folds, seed=seed, alpha=alpha,
         min_ratio=_glmnet_min_ratio(n, p), progress_bar=False,
     )
-    best_lmda = float(cv_res.lmdas[cv_res.best_idx])                                                                                                        
-                                                                                                                                                              
-    # Refit at best_lmda using the single-lambda solver that every                                                                                          
-    # per-test-point fit downstream uses.  Path-fit vs single-lambda                                                                                        
-    # cold-start differ by ~1e-2 in practice (glmnet-family behavior);                                                                                      
-    # using the same solver everywhere keeps global_lasso and ld on
-    # one β scale.                                                                                                                                          
-    single = adelie_lasso_fit(X_train, y_train, lmda=best_lmda,
-                                weights=weights, alpha=1.0)                                                                                                  
-                                                                                                                                                              
-    return {"best_lambda": best_lmda, "beta": single["beta"],
-            "intercept": single["intercept"], "cv_result": cv_res}   
+    best_lmda = float(cv_res.lmdas[cv_res.best_idx])
 
+    # Refit at best_lmda using the single-lambda solver that every
+    # per-test-point fit downstream uses (keeps global and ld on one β scale).
+    single = adelie_lasso_fit(X_train, y_train, lmda=best_lmda,
+                              weights=weights, alpha=alpha)
+
+    return {"best_lambda": best_lmda, "beta": single["beta"],
+            "intercept": single["intercept"], "cv_result": cv_res}
 
 def adelie_lasso_predict(X, beta, intercept):
     return X @ beta + intercept
@@ -142,7 +136,7 @@ def adelie_lasso_predict(X, beta, intercept):
 def adelie_lasso_fit(X_train, y_train, lmda, weights=None, alpha=1.0):
     """Fit elastic-net at a single lambda via adelie.  Penalty:
         lambda * [alpha * ||beta||_1 + (1-alpha)/2 * ||beta||_2^2]
-    alpha=1.0 → pure lasso.  Always fits an unpenalized intercept.
+    alpha=1.0 -> lasso.  Always fits an unpenalized intercept.
     """
     X = np.asfortranarray(X_train.astype(np.float64))
     y = y_train.astype(np.float64)
@@ -172,6 +166,7 @@ def _make_tabpfn(device):
     return TabPFNRegressor.create_default_for_version(
         TABPFN_MODEL_VERSION, device=device,
         ignore_pretraining_limits=True, n_estimators=TABPFN_N_ESTIMATORS)
+        
 
 
 def tabpfn_predict(X_train, y_train, X_test, device=None):
@@ -227,10 +222,6 @@ def xgboost_cv(X_train, y_train, n_folds=5, random_state=None):
 # API verified against examples/regression_example.py (main, 2026-07):
 #   model = tabfm.tabfm_v1_0_0_pytorch.load(model_type="regression")
 #   reg   = tabfm.TabFMRegressor(model=model); reg.fit(X, y); reg.predict(Xte)
-# Pretrained weights load once (HF Hub) and are cached module-side; each fit
-# only re-seeds the in-context training set (no gradient training).  Fed the
-# same standardized matrix as TabPFN/XGBoost, so it is an apples-to-apples
-# third teacher rather than TabFM's native raw mixed-type DataFrame path.
 _TABFM_MODEL = None
 
 
@@ -294,7 +285,7 @@ def local_distill(X_train, y_train, X_test,
                    lambda_scale="fixed", alpha=1.0):
     """Per-test-point local distillation.
 
-    1. μ = MSE_OOF(student) / MSE_OOF(teacher).  If μ ≤ 1, return global
+    1. μ = MSE_OOF(student) / MSE_OOF(teacher).  If μ <= 1, return global
        lasso for all test points (teacher gives no edge).
     2. Similarity S[i, :] = softmax over teacher predictions.
     3. Per-test-point λ: ``lambda_hat`` or scaled by sqrt(n/max(n_eff_i, n_min)).
@@ -309,7 +300,7 @@ def local_distill(X_train, y_train, X_test,
     n, m = X_train.shape[0], X_test.shape[0]
     p = X_train.shape[1]
 
-    cv_result = adelie_lasso_cv(X_train, y_train, n_folds=5, seed=random_state)
+    cv_result = adelie_lasso_cv(X_train, y_train, n_folds=5, seed=random_state, alpha=alpha)
     global_beta = cv_result["beta"]
     global_intercept = float(cv_result["intercept"])
     global_preds = adelie_lasso_predict(X_test, global_beta, global_intercept)
@@ -340,12 +331,6 @@ def local_distill(X_train, y_train, X_test,
     S = teacher_similarity(teacher_oof_preds, teacher_preds_test)
     n_eff = 1.0 / (S ** 2).sum(axis=1)
     distill_weight = mu / np.sqrt(n_eff)
-
-    # n_min = min_n_ratio * n  # floor on n_eff for the scaled-lambda case
-    # if lambda_scale == "n_eff":
-    #     lambdas_i = lambda_ * np.sqrt(n / np.maximum(n_eff, n_min))
-    # else:
-    #     lambdas_i = np.full(m, lambda_)
 
     tot = 1.0 + distill_weight              # sum of w_aug; S rows already sum to 1
     n_min = min_n_ratio * n
@@ -385,21 +370,13 @@ def local_distill(X_train, y_train, X_test,
 def local_distill_ablation(X_train, y_train, X_test,
                            teacher_preds_test, teacher_oof_preds,
                            student_oof_preds,
-                           lambda_=None, epsilon=1e-8, random_state=None):
-    """Two novel cells of local distillation's 2x2 ablation:
+                           lambda_=None, epsilon=1e-8, alpha = 1, random_state=None):
+    """Two cells of local distillation's 2x2 ablation:
         "anchor"  : uniform weights, + teacher anchor (x_i, phi(x_i))
         "weights" : teacher-similarity row weights S, no anchor
 
-    The other two corners of the 2x2 are recovered from methods computed
-    elsewhere and are NOT recomputed here: the (uniform, no-anchor) corner is
-    the global lasso (`global_lasso`), and the (S, anchor) corner is full local
-    distillation (`ld` / `local_distill`).
-
-    Both cells share one global mu and the same mu <= 1 fallback to the global
-    lasso, so any difference between them isolates each component's effect.
-    Fixed global lambda, pure lasso (alpha=1) -- the same config as method_ld.
-    Uniform-weight rows sum to 1 (matching the softmax scale of S), so the
-    effective size is n_eff = n and the anchor weight is mu / sqrt(n).
+    The other two are NOT recomputed here: the (uniform, no-anchor) is
+    the global lasso (`global_lasso`), and (S, anchor) is local distillation.
 
     Returns dict: mu, used_global, lambda_, sim_weights, n_eff, and ``cells``
     (a dict mapping the two cell names to their per-point fits).
@@ -407,7 +384,7 @@ def local_distill_ablation(X_train, y_train, X_test,
     n, m = X_train.shape[0], X_test.shape[0]
     p = X_train.shape[1]
 
-    cv_result = adelie_lasso_cv(X_train, y_train, n_folds=5, seed=random_state)
+    cv_result = adelie_lasso_cv(X_train, y_train, n_folds=5, seed=random_state, alpha = alpha)
     global_beta = cv_result["beta"]
     global_intercept = float(cv_result["intercept"])
     if lambda_ is None:
@@ -447,7 +424,7 @@ def local_distill_ablation(X_train, y_train, X_test,
     for i in range(m):
         # weights: teacher-weighted rows, no anchor.
         fw = adelie_lasso_fit(X_train, y_train, lmda=lambda_,
-                              weights=S[i], alpha=1.0)
+                              weights=S[i], alpha=alpha)
         cells["weights"]["betas"][i] = fw["beta"]
         cells["weights"]["intercepts"][i] = float(fw["intercept"])
         cells["weights"]["predictions"][i] = float(
@@ -457,7 +434,7 @@ def local_distill_ablation(X_train, y_train, X_test,
         X_aug = np.vstack([X_train, X_test[i:i + 1]])
         y_aug = np.concatenate([y_train, [teacher_preds_test[i]]])
         wa = np.concatenate([w_unif, [dw_unif]])
-        fa = adelie_lasso_fit(X_aug, y_aug, lmda=lambda_ / tot_unif, weights=wa, alpha=1.0)
+        fa = adelie_lasso_fit(X_aug, y_aug, lmda=lambda_ / tot_unif, weights=wa, alpha=alpha)
 
         cells["anchor"]["betas"][i] = fa["beta"]
         cells["anchor"]["intercepts"][i] = float(fa["intercept"])
@@ -573,13 +550,13 @@ def _stab_pairs(betas, pairs, coords, tol=1e-6):
 
 
 def _local_lipschitz_per_point(betas, coords, k=5, tol=1e-6):
-    """Per-point local Lipschitz à la Alvarez-Melis & Jaakkola (2018), Eq. 2.
+    """Per-point local Lipschitz, Alvarez-Melis & Jaakkola (2018).
 
     For each test point i, take its k nearest neighbors in ``coords`` and
     return max_j ||β_i − β_j|| / ||x_i − x_j||.  Aggregation across points
     is left to the caller (we report the mean and the median).
 
-    ``coords`` may be 2D (x-space) or 1D (φ-space).
+    ``coords`` may be 2D (x-space) or 1D (phi-space).
     """
     if betas is None or len(coords) <= k:
         return NAN, NAN, NAN
@@ -627,7 +604,7 @@ def stability_diagnostics_v2(betas, X_test, phi=None, k=5, tol=1e-6):
 
     Reference: Alvarez-Melis & Jaakkola (2018), "On the Robustness of
     Interpretability Methods", arXiv:1806.08049, Eq. 2 (discrete variant);
-    we substitute a k-NN neighborhood for their ε-ball to ensure consistent
+    we substitute a k-NN neighborhood for their eps-ball to ensure consistent
     estimator support across heterogeneous datasets.
     """
     if betas is None:

@@ -1,8 +1,6 @@
 """MAPLE (Plumb, Molitor, Talwalkar 2018).
 
-Thin wrapper around the authors' reference implementation, vendored
-verbatim in ``_maple_ref.py``.  The algorithm is unchanged from the
-paper:
+Thin wrapper around the reference implementation``_maple_ref.py``.  
 
     1. Random forest (n_estimators=200, max_features=0.5, min_samples_leaf=10)
        fit to y.
@@ -14,8 +12,7 @@ paper:
     4. Per-test-point weighted ridge (alpha=0.001) on the retained features.
 
 Reproducibility note: the ref code does not thread a seed into the
-RandomForestRegressor, so we seed numpy globally here to keep runs
-deterministic.
+RandomForestRegressor, so we seed numpy globally here.
 """
 from __future__ import annotations
 import time, sys

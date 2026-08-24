@@ -36,8 +36,6 @@ pip install -e .[pytorch] && cd ..     # record `git rev-parse HEAD` for reprodu
 # LLF comparator needs R with the grf package:
 Rscript -e 'install.packages("grf", repos="https://cloud.r-project.org")'
 
-# TODO attentionLasso 
-
 # Fetch the datasets (see DATA_SOURCES.md):
 python prepare_data.py
 ```

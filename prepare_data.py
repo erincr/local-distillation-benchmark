@@ -71,7 +71,8 @@ def fetch_openml(names):
     import openml
     # The canonical regression suite.  If the alias ever fails, pass the numeric
     # suite id instead: openml.study.get_suite(<id>)  (see www.openml.org).
-    suite = openml.study.get_suite("OpenML-CTR23")
+    #suite = openml.study.get_suite("OpenML-CTR23")
+    suite = openml.study.get_suite(353)
     avail = {}  # normalized dataset name -> data id
     for did in suite.data:
         try:

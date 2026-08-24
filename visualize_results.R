@@ -15,7 +15,7 @@ OUTDIR <- file.path(ROOT, "figures")
 PAPER  <- OUTDIR   # where plots are written
 dir.create(OUTDIR, showWarnings = FALSE, recursive = TRUE)
 
-# Dataset ordering (n_train ascending — matches the experiment script order)
+# Dataset ordering (n_train ascending)
 dataset_order <- c(
   "Automobile","Servo","Liver_Disorders","Auto_MPG","Real_Estate_Valuation",
   "forest_fires","student_performance_por","energy_efficiency","cars",
@@ -25,38 +25,34 @@ dataset_order <- c(
 )
 
 # --- colors ------------------------------------------------------------------
-# Teacher families: TabPFN = blues, XGBoost = wine-rose, TabFM = purples.
-# Each family has a teacher, a lasso student "(L)", and a ridge student "(R)".
-# The ridge students only appear once the Great Lakes rerun has produced them.
+# Teacher families: TabPFN = blues, XGBoost = rose, TabFM = purples.
 method_colors <- c(
-  "Lasso"              = "#2d2e6f",  # deep ultramarine — global lasso baseline
-  "Ridge"              = "#77778a",  # blue-gray — global ridge baseline
+  "Lasso"              = "#2d2e6f",  
+  "Ridge"              = "#77778a",  
   # TabPFN family (blues)
-  "TabPFN"             = "#2d5aa8",  # rich blue — teacher
-  "TabPFN, dist (L)"   = "#7d9bd4",  # lighter blue — lasso student
-  "TabPFN, dist (R)"   = "#4a78b8",  # mid blue — ridge student
-  # XGBoost family (warm wine-rose)
-  "XGBoost"            = "#8a2148",  # deep wine-rose — teacher
-  "XGB, dist (L)"      = "#d97aa3",  # lighter rose — lasso student
-  "XGB, dist (R)"      = "#b85478",  # mid rose — ridge student
+  "TabPFN"             = "#2d5aa8",  
+  "LD (TabPFN, L)"   = "#7d9bd4", 
+  "LD (TabPFN, R)"   = "#4a78b8",  
+  # XGBoost family (warm rose)
+  "XGBoost"            = "#8a2148",  
+  "LD (XGB, L)"      = "#d97aa3",  
+  "LD (XGB, R)"      = "#b85478",  
   # TabFM family (purples/violets)
-  "TabFM"              = "#5b2d8a",  # deep violet — teacher
-  "TabFM, dist (L)"    = "#9b7dd4",  # lighter violet — lasso student
-  "TabFM, dist (R)"    = "#7a5aae",  # mid violet — ridge student
+  "TabFM"              = "#5b2d8a",  
+  "LD (TabFM, L)"    = "#9b7dd4",  
+  "LD (TabFM, R)"    = "#7a5aae",  
   # Adaptive teacher-selection method (its own family)
-  "Dist (best teacher)" = "#d1a000", # gold — per-sim argmax mu_hat teacher
+  "Dist (best teacher)" = "#d1a000",
   # Other local methods
-  "LLF"                = "#2a9d8f",  # teal — local linear forest baseline
-  "LOESS"              = "#3d5a2e",  # sage-teal
-  "LIME"               = "#8ec4a0",  # soft mint
-  "MAPLE"              = "#5ea87e"   # deep olive
+  "LLF"                = "#2a9d8f",  
+  "LOESS"              = "#3d5a2e",  
+  "LIME"               = "#8ec4a0", 
+  "MAPLE"              = "#5ea87e" 
 )
 
-# Bottom-to-top plotting / factor order, grouped by family.
-# Requested "other" tail order: Lasso, LLF, LOESS, LIME, MAPLE.
-method_levels <- c("TabPFN","TabPFN, dist (L)","TabPFN, dist (R)",
-                   "XGBoost","XGB, dist (L)","XGB, dist (R)",
-                   "TabFM","TabFM, dist (L)","TabFM, dist (R)",
+method_levels <- c("TabPFN","LD (TabPFN, L)","LD (TabPFN, R)",
+                   "XGBoost","LD (XGB, L)","LD (XGB, R)",
+                   "TabFM","LD (TabFM, L)","LD (TabFM, R)",
                    "Dist (best teacher)",
                    "Lasso","Ridge","LLF","LOESS","LIME","MAPLE")
 
@@ -79,28 +75,24 @@ read_jsonl <- function(path) {
 
 df <- read_jsonl(JSONL)
 
-# Drop ablation-only variants (kept out of the main comparison plots), plus
-# LIME and MAPLE: these are post-hoc local *explainers* of a fixed black box,
-# not predictive models, so test R² is off-purpose for them.  They are scoped
-# out of the paper's empirical comparison and discussed in related work instead.
+# Ablation not in main plots 
+# MAPLE not in main plots
 df <- df[!(method %in% c("ld_full", "ld_anchor", "ld_weights",
-                         "lime", "maple")), ]
+                         "lime",
+                         "maple")), ]
 df <- df[status == "ok"]
 
 # Datasets dropped from all analyses:
-#   forest_fires:      famously hard regression; all methods give R^2 ≈ 0
+#   forest_fires:      famously hard regression; all methods give R^2 = 0 skews y range
 #   energy_efficiency: loader behavior changed between runs
 DROP_DATASETS <- c("forest_fires", "energy_efficiency")
 df <- df[!(dataset %in% DROP_DATASETS)]
 
-# --- NEW METHOD: per-simulation teacher selection by largest mu_hat ----------
-# For each (dataset, seed), among the three lasso distillations (one per
-# teacher) pick the row whose distillation put the most weight on its teacher
-# (largest mu_hat on the OOF training data).  This is an oracle-FREE selector:
-# it never looks at test performance, only the CV-estimated mu_hat that the
-# experiment already logged per distillation row.  Computed on the raw method
-# names, before renaming.  (For a ridge analog, swap the method set below to
-# c("ld_ridge","ld_xgb_ridge","ld_tabfm_ridge") once those results exist.)
+# --- Best teacher ----------
+# For each (dataset, seed), among the three lasso distillations, 
+# pick the row whose distillation put the most weight on its teacher
+# (largest mu_hat on the OOF training data).  
+# Equivalent to: lowest CV error among the teacher methods
 tsel_pool <- df[method %in% c("ld", "ld_xgb", "ld_tabfm") & !is.na(mu_hat)]
 if (nrow(tsel_pool) > 0) {
   tsel <- tsel_pool[tsel_pool[, .I[which.max(mu_hat)], by = .(dataset, seed)]$V1]
@@ -120,14 +112,14 @@ df[, dataset := tolower(dataset)]
 df[method == "global_lasso",     method := "Lasso"]
 df[method == "global_ridge",     method := "Ridge"]
 df[method == "teacher",          method := "TabPFN"]
-df[method == "ld",               method := "TabPFN, dist (L)"]
-df[method == "ld_ridge",         method := "TabPFN, dist (R)"]
+df[method == "ld",               method := "LD (TabPFN, L)"]
+df[method == "ld_ridge",         method := "LD (TabPFN, R)"]
 df[method == "xgboost",          method := "XGBoost"]
-df[method == "ld_xgb",           method := "XGB, dist (L)"]
-df[method == "ld_xgb_ridge",     method := "XGB, dist (R)"]
+df[method == "ld_xgb",           method := "LD (XGB, L)"]
+df[method == "ld_xgb_ridge",     method := "LD (XGB, R)"]
 df[method == "tabfm",            method := "TabFM"]
-df[method == "ld_tabfm",         method := "TabFM, dist (L)"]
-df[method == "ld_tabfm_ridge",   method := "TabFM, dist (R)"]
+df[method == "ld_tabfm",         method := "LD (TabFM, L)"]
+df[method == "ld_tabfm_ridge",   method := "LD (TabFM, R)"]
 df[method == "ld_muselect",      method := "Dist (best teacher)"]
 df[method == "lime",             method := "LIME"]
 df[method == "loess",            method := "LOESS"]
@@ -136,14 +128,13 @@ df[method == "llf",              method := "LLF"]
 
 df[, method := factor(method, levels = method_levels)]
 
-# Datasets ordered by the teacher's R² gain over the lasso (used by some plots).
-# Uses MEDIAN R² per method: mean is fragile because a few catastrophic seeds
-# (e.g. Infrared Thermography's lasso) tank the mean and inflate the gap.
+# Datasets ordered by the teacher's improvement over the lasso 
+# (used by some plots).
 gap_order <- df[method %in% c("TabPFN", "Lasso"),
                 .(r2 = median(test_r2)), by = .(dataset, method)] |>
   dcast(dataset ~ method, value.var = "r2")
 gap_order[, gap := TabPFN - Lasso]
-ordered_datasets <- gap_order[order(-gap), dataset]   # descending median gap
+ordered_datasets <- gap_order[order(-gap), dataset] 
 
 #########################
 # Dot plot
@@ -156,17 +147,13 @@ make_dot_plot <- function(df,
                           title = "",
                           xlab = "",
                           direction = "max",
-                          method_order = c("TabPFN","TabPFN, dist (L)","TabPFN, dist (R)",
-                                           "XGBoost","XGB, dist (L)","XGB, dist (R)",
-                                           "TabFM","TabFM, dist (L)","TabFM, dist (R)",
+                          method_order = c("TabPFN","LD (TabPFN, L)","LD (TabPFN, R)",
+                                           "XGBoost","LD (XGB, L)","LD (XGB, R)",
+                                           "TabFM","LD (TabFM, L)","LD (TabFM, R)",
                                            "Dist (best teacher)",
                                            "Lasso","Ridge","LLF","LOESS","LIME","MAPLE"),
                           dataset_facet_order = NULL,
                           caption, label, out_path) {
-  # Median center + robust SE (MAD/sqrt(n)).  Median resists outlier seeds so
-  # a single catastrophic split (e.g. LIME's ~-10 R^2 on space_ga) no longer
-  # drags the point off-scale; MAD keeps the error bar from re-stretching the
-  # free x-axis the way sd would.
   forplot <- df[
     !(method %in% exclude) & dataset %in% datasets,
     .(m = median(get(metric_col)), se.1 = mad(get(metric_col))/sqrt(.N)),
@@ -180,9 +167,6 @@ make_dot_plot <- function(df,
           dataset := "concrete comp. strength"]
 
   if (!is.null(dataset_facet_order)) {
-    # Apply the same abbreviations to the ordering vector so it still matches
-    # forplot$dataset after the renames above (needed for the full appendix,
-    # which includes infrared/concrete).
     dfo <- as.character(dataset_facet_order)
     dfo[dfo == "infrared thermography temperature"] <- "infrared therm. temp."
     dfo[dfo == "concrete compressive strength"]     <- "concrete comp. strength"
@@ -190,17 +174,15 @@ make_dot_plot <- function(df,
     forplot[, dataset := factor(dataset, levels = facet_order)]
   }
 
-  # Restrict factor levels to methods actually present, in the requested
-  # bottom-to-top y-axis order.
   present_in_order <- intersect(rev(method_order), unique(as.character(forplot$method)))
   forplot[, method := factor(method, levels = present_in_order)]
 
-  # Family dividers: light gray hlines between method groups
+  # Family dividers: hlines between method groups
   # (TabPFN | XGB | TabFM | selected | other locals).
   family_of <- function(m) {
-    if (m %in% c("TabPFN","TabPFN, dist (L)","TabPFN, dist (R)")) "tabpfn"
-    else if (m %in% c("XGBoost","XGB, dist (L)","XGB, dist (R)")) "xgb"
-    else if (m %in% c("TabFM","TabFM, dist (L)","TabFM, dist (R)")) "tabfm"
+    if (m %in% c("TabPFN","LD (TabPFN, L)","LD (TabPFN, R)")) "tabpfn"
+    else if (m %in% c("XGBoost","LD (XGB, L)","LD (XGB, R)")) "xgb"
+    else if (m %in% c("TabFM","LD (TabFM, L)","LD (TabFM, R)")) "tabfm"
     else if (m == "Dist (best teacher)") "select"
     else if (m %in% c("Lasso","Ridge")) "global_linear"
     else "local"
@@ -211,18 +193,19 @@ make_dot_plot <- function(df,
   return(
     ggplot(forplot) +
       geom_hline(yintercept = divider_ys, color = "#aaaaaa", linewidth = 0.4) +
-      geom_point(aes(x=m, y=method, color=method)) +
       geom_errorbar(aes(xmin=m-se.1, xmax=m+se.1, y=method, color=method)) +
+      geom_point(aes(x=m, y=method, color=method)) +
       facet_wrap(~dataset, ncol=ncol) +#, scales = "free_x") +
       scale_color_manual(values = method_colors, guide = "none") +
+      # scale_x_continuous(
+      #   labels = scales::number_format(accuracy = 0.01),
+      #   breaks = scales::pretty_breaks(n = 3)
+      # ) +
       scale_x_continuous(
         labels = scales::number_format(accuracy = 0.01),
-        breaks = scales::pretty_breaks(n = 3)
+        breaks = scales::pretty_breaks(n = 3),
+        limits = c(-0.25, 1), oob = scales::squish
       ) +
-      # theme_minimal FIRST (it is a *complete* theme and would otherwise wipe
-      # any theme() tweaks added before it), then override.  theme_minimal sets
-      # plot/panel backgrounds to element_blank() (transparent), which renders
-      # as gray in many viewers/PNGs — so we force solid white here.
       theme_minimal(base_size = 12) +
       theme(
         panel.spacing.x  = unit(1.2, "lines"),
@@ -240,10 +223,6 @@ make_dot_plot <- function(df,
 }
 
 # --- appendix: all datasets, split across two portrait full pages ------------
-# 13 method rows per facet (once ridge lands) across 17 datasets won't fit one
-# page legibly, so we split the datasets into two ncol=3 figures ordered by the
-# teacher-over-lasso gap (page 1 = highest-gap half, page 2 = the rest).  Caption
-# them as one logical figure: "Figure AX" and "Figure AX (continued)".
 render_appendix <- function(ds_subset, out_path) {
   p <- make_dot_plot(df, "test_r2",
                      datasets = ds_subset,
@@ -261,12 +240,9 @@ render_appendix(appendix_ds[(half + 1):length(appendix_ds)],
                 file.path(PAPER, "appendix_r2_p2.pdf"))
 
 # --- main figure: two teachers (TabPFN + XGBoost), each with lasso + ridge
-# students, plus Lasso / Ridge / LLF / LOESS.  Shows generality across teachers and the
-# lasso-vs-ridge student comparison.  TabFM and Dist(best teacher) are dropped
-# here and live in the full appendix figure.  (LIME/MAPLE are already removed
-# globally at load time.)
-MAIN_EXCLUDE <- c("TabFM", "TabFM, dist (L)", "TabFM, dist (R)",
-                  "Dist (best teacher)")
+MAIN_EXCLUDE <- c("TabFM", "LD (TabFM, L)", "LD (TabFM, R)",
+                  "Dist (best teacher)",
+                  "LIME")
 short.plot <- make_dot_plot(df, "test_r2",
                             ncol = 3,
                             exclude = MAIN_EXCLUDE,
@@ -278,4 +254,6 @@ short.plot <- make_dot_plot(df, "test_r2",
          subtitle = "Datasets ordered by TabPFN's median R² improvement over the lasso.\nError bars represent 1 SE across 20 train/test splits."
          )
 
-ggsave(file.path(PAPER, "r2_first.pdf"), plot = short.plot, width = 10, height = 5.1, bg = "white")
+ggsave(file.path(PAPER, "r2_first.pdf"), plot = short.plot, width = 10, height = 5.5, bg = "white")
+
+
