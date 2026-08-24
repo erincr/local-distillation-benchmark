@@ -9,7 +9,7 @@ library(latex2exp)
 
 # --- config ------------------------------------------------------------------
 # Paths are relative to the repo root (run this script from there, or set ROOT).
-ROOT   <- "."
+ROOT   <- ""
 JSONL  <- file.path(ROOT, "results", "local_explanation_benchmark", "results.jsonl")
 OUTDIR <- file.path(ROOT, "figures")
 PAPER  <- OUTDIR   # where plots are written
@@ -213,7 +213,7 @@ make_dot_plot <- function(df,
       geom_hline(yintercept = divider_ys, color = "#aaaaaa", linewidth = 0.4) +
       geom_point(aes(x=m, y=method, color=method)) +
       geom_errorbar(aes(xmin=m-se.1, xmax=m+se.1, y=method, color=method)) +
-      facet_wrap(~dataset, ncol=ncol, scales = "free_x") +
+      facet_wrap(~dataset, ncol=ncol) +#, scales = "free_x") +
       scale_color_manual(values = method_colors, guide = "none") +
       scale_x_continuous(
         labels = scales::number_format(accuracy = 0.01),
@@ -227,7 +227,11 @@ make_dot_plot <- function(df,
       theme(
         panel.spacing.x  = unit(1.2, "lines"),
         plot.background  = element_rect(fill = "white", color = NA),
-        panel.background = element_rect(fill = "white", color = NA)
+        panel.background = element_rect(fill = "white", color = NA),
+        # Grey label bars above each facet, and a box around each panel.
+        strip.background = element_rect(fill = "grey90", color = NA),
+        strip.text       = element_text(margin = margin(4, 0, 4, 0)),
+        panel.border     = element_rect(color = "grey70", fill = NA, linewidth = 0.4)
       ) +
       labs(y = NULL, x = xlab,
            title = title,
@@ -247,7 +251,7 @@ render_appendix <- function(ds_subset, out_path) {
                      dataset_facet_order = ordered_datasets,
                      xlab = expression(paste("Test ", R^2)),
                      title = expression(paste(R^2, " comparison across methods")))
-  ggsave(out_path, plot = p, width = 10, height = 8, bg = "white")
+  ggsave(out_path, plot = p, width = 10, height = 9, bg = "white")
 }
 appendix_ds <- as.character(ordered_datasets)
 half <- ceiling(length(appendix_ds) / 2)
@@ -268,127 +272,10 @@ short.plot <- make_dot_plot(df, "test_r2",
                             exclude = MAIN_EXCLUDE,
                             xlab = expression(paste("Test ", R^2)),
                             title = expression(paste(R^2, " comparison across methods")),
-                            datasets = c("space ga","servo","real estate valuation",
-                                         "airfoil self noise","abalone","qsar fish toxicity"),
+                            datasets = c("airfoil self noise", "automobile", "cars", "servo", "socmob", "student performance"),
                             dataset_facet_order = ordered_datasets) +
        labs(
          subtitle = "Datasets ordered by TabPFN's median R² improvement over the lasso.\nError bars represent 1 SE across 20 train/test splits."
          )
 
-ggsave(file.path(PAPER, "r2_first.pdf"), plot = short.plot, width = 10, height = 6, bg = "white")
-
-# # --- standalone proposal figure ----------------------------------------------
-# proposal_datasets <- c("airfoil self noise", "auction verification",
-#                        "servo", "liver disorders")
-# proposal_methods <- c("TabPFN", "TabPFN, dist (L)",
-#                       "Lasso", "LOESS", "LIME", "MAPLE")
-# 
-# proposal_data <- df[
-#   method %in% proposal_methods & dataset %in% proposal_datasets,
-#   .(m = median(test_r2), se.1 = mad(test_r2) / sqrt(.N)),
-#   by = .(method, dataset)
-# ]
-# 
-# proposal_data[dataset == "infrared thermography temperature",
-#               dataset := "infrared therm. temp."]
-# proposal_data[dataset == "concrete compressive strength",
-#               dataset := "concrete comp. strength"]
-# 
-# proposal_data[method == "TabPFN, dist (L)", method := "Local distillation (proposed)"]
-# proposal_methods_display <- c("TabPFN", "Local distillation (proposed)",
-#                               "Lasso", "LOESS", "LIME", "MAPLE")
-# proposal_data[, method := factor(method, levels = rev(proposal_methods_display))]
-# method_colors["Local distillation (proposed)"] <- "#4a7bd4"
-# 
-# proposal.plot <- ggplot(proposal_data) +
-#   geom_point(aes(x = m, y = method, color = method)) +
-#   geom_errorbar(aes(xmin = m - se.1, xmax = m + se.1, y = method, color = method)) +
-#   facet_wrap(~dataset, ncol = 2, scales = "free_x") +
-#   scale_color_manual(values = method_colors, guide = "none") +
-#   scale_x_continuous(
-#     labels = scales::number_format(accuracy = 0.01),
-#     breaks = scales::pretty_breaks(n = 3)
-#   ) +
-#   theme_minimal(base_size = 12) +
-#   theme(
-#     panel.spacing.x = unit(1.2, "lines"),
-#     plot.background  = element_rect(fill = "white", color = NA),
-#     panel.background = element_rect(fill = "white", color = NA),
-#     strip.background = element_rect(fill = "grey90", color = NA),
-#     strip.text = element_text(margin = margin(4, 0, 4, 0))
-#   ) +
-#   labs(
-#     y = NULL,
-#     x = expression(paste("Test ", R^2)),
-#     title = expression(paste("Test ", R^2, " performance across datasets and methods")),
-#     subtitle = "Comparison on regression tasks from the UCI ML and OpenML repositories.\nError bars represent 1 SE across 20 train/test splits."
-#   )
-# ggsave(file.path(PAPER, "r2_proposal.pdf"),
-#        plot = proposal.plot, width = 8.5, height = 4, bg = "white")
-
-# #################################################
-# # Teacher-agnostic plot: each student tracks its own teacher
-# # (three teacher/student pairs: TabPFN, XGBoost, TabFM)
-# #################################################
-# gaps_t <- merge(
-#   df[method == "TabPFN, dist (L)", .(dataset, seed, r2_s = test_r2)],
-#   df[method == "TabPFN",           .(dataset, seed, r2_t = test_r2)],
-#   by = c("dataset", "seed")
-# )[, .(dataset, seed, gap = r2_s - r2_t,
-#       pair = "Distill (TabPFN, lasso) − TabPFN")]
-# 
-# gaps_x <- merge(
-#   df[method == "XGB, dist (L)", .(dataset, seed, r2_s = test_r2)],
-#   df[method == "XGBoost",       .(dataset, seed, r2_t = test_r2)],
-#   by = c("dataset", "seed")
-# )[, .(dataset, seed, gap = r2_s - r2_t,
-#       pair = "Distill (XGB, lasso) − XGBoost")]
-# 
-# gaps_f <- merge(
-#   df[method == "TabFM, dist (L)", .(dataset, seed, r2_s = test_r2)],
-#   df[method == "TabFM",           .(dataset, seed, r2_t = test_r2)],
-#   by = c("dataset", "seed")
-# )[, .(dataset, seed, gap = r2_s - r2_t,
-#       pair = "Distill (TabFM, lasso) − TabFM")]
-# 
-# forteachers <- rbindlist(list(gaps_t, gaps_x, gaps_f))[
-#   , .(m = mean(gap), se.1 = sd(gap)/sqrt(.N)),
-#     by = .(dataset, pair)]
-# 
-# forteachers[dataset == "infrared thermography temperature",
-#             dataset := "infrared therm. temp."]
-# forteachers[dataset == "concrete compressive strength",
-#             dataset := "concrete comp. strength"]
-# 
-# order_dt <- forteachers[pair == "Distill (TabPFN, lasso) − TabPFN"][order(m), dataset]
-# forteachers[, dataset := factor(dataset, levels = order_dt)]
-# 
-# teachers.plot <- ggplot(forteachers,
-#                         aes(x = m, y = dataset, color = pair, shape = pair)) +
-#   geom_vline(xintercept = 0, linetype = "dashed", color = "#666666") +
-#   geom_pointrange(aes(xmin = m - se.1, xmax = m + se.1),
-#                   size = 0.4, linewidth = 0.8,
-#                   position = position_dodge(width = 0.5)) +
-#   scale_color_manual(
-#     values = c("Distill (TabPFN, lasso) − TabPFN" = "#7d9bd4",
-#                "Distill (XGB, lasso) − XGBoost"   = "#d97aa3",
-#                "Distill (TabFM, lasso) − TabFM"   = "#9b7dd4"),
-#     name = NULL
-#   ) +
-#   scale_shape_manual(
-#     values = c("Distill (TabPFN, lasso) − TabPFN" = 16,
-#                "Distill (XGB, lasso) − XGBoost"   = 17,
-#                "Distill (TabFM, lasso) − TabFM"   = 15),
-#     name = NULL
-#   ) +
-#   labs(
-#     y = NULL,
-#     x = expression("R"^2 * " difference: distillation − teacher"),
-#     title = "Local distillation tracks its teacher across datasets",
-#     subtitle = "Negative values: student worse than teacher.\nError bars: 1 SE across 20 train/test splits."
-#   ) +
-#   theme_minimal(base_size = 12) +
-#   theme(plot.background  = element_rect(fill = "white", color = NA),
-#         panel.background = element_rect(fill = "white", color = NA))
-# ggsave(file.path(PAPER, "teachers_gap.pdf"),
-#        plot = teachers.plot, width = 7, height = 5, bg = "white")
+ggsave(file.path(PAPER, "r2_first.pdf"), plot = short.plot, width = 10, height = 5.1, bg = "white")

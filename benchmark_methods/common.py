@@ -302,6 +302,7 @@ def local_distill(X_train, y_train, X_test,
        augmented (training + anchor) design and read off per-test-point
        coefficients.
     """
+
     if lambda_scale not in ("fixed", "n_eff"):
         raise ValueError(f"unknown lambda_scale: {lambda_scale}")
 
@@ -340,11 +341,18 @@ def local_distill(X_train, y_train, X_test,
     n_eff = 1.0 / (S ** 2).sum(axis=1)
     distill_weight = mu / np.sqrt(n_eff)
 
-    n_min = min_n_ratio * n  # floor on n_eff for the scaled-lambda case
+    # n_min = min_n_ratio * n  # floor on n_eff for the scaled-lambda case
+    # if lambda_scale == "n_eff":
+    #     lambdas_i = lambda_ * np.sqrt(n / np.maximum(n_eff, n_min))
+    # else:
+    #     lambdas_i = np.full(m, lambda_)
+
+    tot = 1.0 + distill_weight              # sum of w_aug; S rows already sum to 1
+    n_min = min_n_ratio * n
     if lambda_scale == "n_eff":
-        lambdas_i = lambda_ * np.sqrt(n / np.maximum(n_eff, n_min))
+        lambdas_i = lambda_ * np.sqrt(n / np.maximum(n_eff, n_min)) / tot
     else:
-        lambdas_i = np.full(m, lambda_)
+        lambdas_i = lambda_ / tot
 
     local_preds = np.zeros(m)
     betas = np.zeros((m, p))
@@ -425,9 +433,10 @@ def local_distill_ablation(X_train, y_train, X_test,
     S = teacher_similarity(teacher_oof_preds, teacher_preds_test)
     n_eff = 1.0 / (S ** 2).sum(axis=1)
 
-    w_unif = np.full(n, 1.0 / n)        # uniform rows, sum to 1 like S
-    dw_unif = mu / np.sqrt(n)           # anchor weight, uniform cell (n_eff = n)
-
+    w_unif = np.full(n, 1.0 / n)
+    dw_unif = mu / np.sqrt(n)
+    tot_unif = 1.0 + dw_unif
+    
     cells = {
         "anchor":  {"predictions": np.zeros(m), "betas": np.zeros((m, p)),
                     "intercepts": np.zeros(m)},
@@ -448,7 +457,8 @@ def local_distill_ablation(X_train, y_train, X_test,
         X_aug = np.vstack([X_train, X_test[i:i + 1]])
         y_aug = np.concatenate([y_train, [teacher_preds_test[i]]])
         wa = np.concatenate([w_unif, [dw_unif]])
-        fa = adelie_lasso_fit(X_aug, y_aug, lmda=lambda_, weights=wa, alpha=1.0)
+        fa = adelie_lasso_fit(X_aug, y_aug, lmda=lambda_ / tot_unif, weights=wa, alpha=1.0)
+
         cells["anchor"]["betas"][i] = fa["beta"]
         cells["anchor"]["intercepts"][i] = float(fa["intercept"])
         cells["anchor"]["predictions"][i] = float(
